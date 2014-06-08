@@ -1,13 +1,12 @@
 #define _BSD_SOURCE
 
 #include <stdlib.h>
-#include <ncurses.h>
+#include <curses.h>
 #include <unistd.h>
 #include <signal.h>
 
 /* 0~255を0~1000に変換する */
 #define CONVERT_RANGE(c) ((int)(((double)c / 255.0) * 1000.0))
-
 
 enum {
     BN_COLOR_BLACK = COLOR_BLACK,
@@ -49,44 +48,60 @@ static const char* bird[][MAX_AA_HEIGHT] = {
 void signal_handler(int);
 static inline void init_bn(void);
 static inline void quit_bn(void);
+void worker_loop(void*);
+void worker_input(void*);
 
+/* 基準面 */
+int base_line;
+const char** draw;
+int steps;
+int cnt;
+
+void worker_loop(void* arg) {
+    /* 右から左へ */
+    if (steps < 0) {
+        quit_bn();
+    }
+    /* 2フレームごとにAAを切り替え */
+    if (++cnt == 2) {
+        cnt = 0;
+        draw = (draw == bird[0]) ? (bird[1]) : (bird[0]);
+    }
+
+    /* AAの上方から描画 */
+    for (int y = 0; y < MAX_AA_HEIGHT; ++y) {
+        mvprintw(base_line - MAX_AA_HEIGHT + y, steps, "%s\n", draw[y]);
+    }
+
+    --steps;
+    getch_async(worker_input);
+}
+
+void worker_input(void* arg) {
+    switch((int)arg) {
+        case 'q':
+        case 'Q':
+            quit_bn();
+            return;
+    }
+    refresh();
+    napms_async(100, worker_loop);
+}
 
 int main(int argc, char const* argv[]) {
     init_bn();
-
-    /* 基準面 */
-    const int base_line = LINES / 2;
+    steps = COLS - MAX_AA_WIDTH - 1;
+    base_line = LINES / 2;
 
     /* 基準面描画 */
     attrset(COLOR_PAIR(BN_COLOR_PAIR_GG));
     mvhline(base_line, 0, '^', COLS - 1);
-    refresh();
 
-    int cnt = 0;
-    const char** draw = bird[0];
+    draw = bird[0];
 
     attrset(COLOR_PAIR(BN_COLOR_PAIR_DEFAULT));
 
-    /* 右から左へ */
-    for (int x = COLS - MAX_AA_WIDTH - 1; 0 <= x; --x) {
-        /* 2フレームごとにAAを切り替え */
-        if (++cnt == 2) {
-            cnt = 0;
-            draw = (draw == bird[0]) ? (bird[1]) : (bird[0]);
-        }
-
-        /* AAの上方から描画 */
-        for (int y = 0; y < MAX_AA_HEIGHT; ++y) {
-            mvprintw(base_line - MAX_AA_HEIGHT + y, x, "%s\n", draw[y]);
-        }
-        refresh();
-
-        usleep(100000); // 0.1s
-    }
-
-    quit_bn();
-
-    return 0;
+    worker_loop(NULL);
 }
 
 
@@ -129,6 +144,9 @@ static inline void init_bn(void) {
     scrollok(stdscr, FALSE);
     /* カーソルを非表示に */
     curs_set(0);
+    timeout(0);
+    keypad(stdscr, TRUE);
+
 }
 
 
